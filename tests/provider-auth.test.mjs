@@ -23,8 +23,9 @@ test('identity comes from trusted getUser response with fixed URL, public apikey
   assert.equal(calls[0].init.method, 'GET');
   assert.equal(calls[0].init.headers.apikey, env.PUBLIC_SUPABASE_PUBLISHABLE_KEY);
   assert.equal(calls[0].init.headers.Authorization, 'Bearer ' + token);
-  assert.equal(calls[0].init.cache, 'no-store');
-  assert.equal(calls[0].init.redirect, 'error');
+  assert.equal(Object.hasOwn(calls[0].init, 'cache'), false);
+  assert.equal(calls[0].init.headers['Cache-Control'], 'no-store');
+  assert.equal(calls[0].init.redirect, 'manual');
   assert.ok(calls[0].init.signal instanceof AbortSignal);
 });
 
@@ -111,4 +112,18 @@ test('successful validations are not cached between requests', async () => {
   assert.ok(await resolveProviderIdentity(request(), env, fetcher));
   assert.equal(await resolveProviderIdentity(request(), env, fetcher), null);
   assert.equal(calls, 2);
+});
+
+
+test('Cloudflare-compatible transport avoids unsupported cache/error redirect options and preserves auth rejection', async () => {
+  let calls = 0;
+  const cloudflareFetch = async (url, init) => {
+    calls++;
+    if (Object.hasOwn(init, 'cache')) throw new TypeError('Unsupported cache mode');
+    if (!['manual', 'follow'].includes(init.redirect)) throw new TypeError('Unsupported redirect mode');
+    assert.equal(init.headers['Cache-Control'], 'no-store');
+    return response({ error_code: 'bad_jwt' }, 403);
+  };
+  assert.equal(await resolveProviderIdentity(request('a.b.c'), env, cloudflareFetch), null);
+  assert.equal(calls, 1);
 });

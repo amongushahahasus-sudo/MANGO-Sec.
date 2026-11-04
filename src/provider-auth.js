@@ -72,9 +72,8 @@ export async function resolveProviderIdentity(request, env = {}, fetcher = fetch
     const validation = (async () => {
       const response = await fetcher(config.origin + '/auth/v1/user', {
         method: 'GET',
-        headers: { apikey: config.key, Authorization: 'Bearer ' + token, Accept: 'application/json' },
-        cache: 'no-store',
-        redirect: 'error',
+        headers: { apikey: config.key, Authorization: 'Bearer ' + token, Accept: 'application/json', 'Cache-Control': 'no-store' },
+        redirect: 'manual',
         signal: controller.signal,
       });
       if (response.status === 401 || response.status === 403) return null;
