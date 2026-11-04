@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>MANGO Sec.</title>
+  <desc>A golden mango with a green leaf on a warm cream background.</desc>
+  <rect width="512" height="512" fill="#fff1d9"/>
+  <g transform="translate(84 97) scale(5.2)">
+    <path fill="#ffad42" d="M49 16C34 5 11 18 10 36c-1 20 25 24 37 9 9-12 10-23 2-29Z"/>
+    <path fill="#f68b28" d="M49 16c6 9 2 22-6 30-9 9-22 10-29 3 9 12 25 7 33-4 9-12 10-23 2-29Z"/>
+    <path fill="#3e7760" d="M35 13C39 0 51 1 56 4c-2 10-12 14-21 9Z"/>
+    <path fill="none" stroke="#fff1d9" stroke-linecap="round" stroke-width="2.5" d="M17 32c2-7 7-11 13-13"/>
+  </g>
+</svg>

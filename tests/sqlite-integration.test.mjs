@@ -30,3 +30,31 @@ test('generated SQL supports real PKCE login, durable account writes, isolation 
  assert.equal(await resolveIdentity(new Request(backend,{headers}),env),null);
  database.close();
 });
+
+test('shared FX authentication keeps Sec accounts isolated using verified provider IDs',async()=>{
+ const database=new DatabaseSync(':memory:');database.exec(await readFile(new URL('../drizzle/0000_mango_accounts.sql',import.meta.url),'utf8'));
+ const env={DB:d1(database)};
+ const original=globalThis.fetch;
+ const users={
+  'Bearer test.alice.signature':{id:'123e4567-e89b-42d3-a456-426614174001',email:'alice@example.test',email_confirmed_at:'2026-01-01T00:00:00Z',is_anonymous:false},
+  'Bearer test.bob.signature':{id:'123e4567-e89b-42d3-a456-426614174002',email:'bob@example.test',email_confirmed_at:'2026-01-01T00:00:00Z',is_anonymous:false},
+ };
+ globalThis.fetch=async(url,options)=>{
+  assert.equal(url,'https://wqczekzebhukjayyhuln.supabase.co/auth/v1/user');
+  const user=users[options.headers.Authorization];
+  return new Response(JSON.stringify(user||{}),{status:user?200:401,headers:{'Content-Type':'application/json'}});
+ };
+ try{
+  const headers={Origin:origin,Authorization:'Bearer test.alice.signature'};
+  const aliceResponse=await handleApplicationRequest(new Request(backend+'/api/account',{headers}),env);
+  assert.equal(aliceResponse.status,200);const alice=await aliceResponse.json();
+  assert.equal(alice.user.id,'supabase:wqczekzebhukjayyhuln:123e4567-e89b-42d3-a456-426614174001');
+  const updated=await handleApplicationRequest(new Request(backend+'/api/watchlist',{method:'PATCH',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({symbols:['NVDA'],expectedVersion:alice.version})}),env);
+  assert.equal(updated.status,200);assert.deepEqual((await updated.json()).watchlist,['NVDA']);
+  const bobResponse=await handleApplicationRequest(new Request(backend+'/api/account',{headers:{Origin:origin,Authorization:'Bearer test.bob.signature'}}),env);
+  const bob=await bobResponse.json();assert.deepEqual(bob.watchlist,[]);assert.equal(bob.version,0);
+  const forged=await handleApplicationRequest(new Request(backend+'/api/account',{headers:{Origin:origin,Authorization:'Bearer claimed.alice.invalid'}}),env);
+  assert.equal(forged.status,401);
+  assert.equal(database.prepare('SELECT count(*) AS total FROM mango_accounts').get().total,2);
+ }finally{globalThis.fetch=original;database.close();}
+});

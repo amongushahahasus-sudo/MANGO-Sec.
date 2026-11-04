@@ -3,14 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://mango-sec-trading.azumaishow781.chatgpt.site; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://mango-sec-trading.azumaishow781.chatgpt.site https://wqczekzebhukjayyhuln.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f8fa">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="MANGO Sec.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
   <meta name="mango-api-base" content="https://mango-sec-trading.azumaishow781.chatgpt.site">
   <meta name="description" content="MANGO Sec. は日本株と米国株の実際の市場データで学ぶ株取引シミュレーターです。仮想資金で、自分のペースで投資を体験。">
   <title>MANGO Sec. — 株取引シミュレーター</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23ffad42' d='M49 16C34 5 11 18 10 36c-1 20 25 24 37 9 9-12 10-23 2-29Z'/%3E%3Cpath fill='%233e7760' d='M35 13C39 0 51 1 56 4c-2 10-12 14-21 9Z'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./account-ui.css">
+  <link rel="stylesheet" href="./onboarding.css">
+  <script src="./vendor/supabase-2.118.0.js" integrity="sha384-TcHRA3zBbn+Lexh5n+Oil4guNPOS3rjNDpGRAN46u/s/mB2IZ50ceC6TYDU2yvgK" defer></script>
 </head>
 <body>
 <div class="app-shell">
@@ -25,12 +34,13 @@
       <button class="nav-item" data-view="portfolio"><svg viewBox="0 0 24 24"><path d="M3 8h18v12H3zM8 8V5h8v3M3 12h18M10 12v3h4v-3"/></svg>ポートフォリオ</button>
       <button class="nav-item" data-view="watchlist"><svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.8 6.4.9-4.6 4.5 1.1 6.3-5.7-3-5.7 3 1.1-6.3L2.8 9.7l6.4-.9Z"/></svg>ウォッチリスト</button>
       <button class="nav-item" data-view="history"><svg viewBox="0 0 24 24"><path d="M4 5v5h5M4.6 9a8 8 0 1 1-.2 6M12 7v5l3 2"/></svg>取引履歴</button>
+    <button class="nav-item" id="show-tutorial"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4M12 17h.01"/></svg>使い方ガイド</button>
     </nav>
     <div class="sidebar-note"><span class="note-icon">✦</span><strong>小さな一歩から、投資を。</strong><p>本物の市場で、リスクなく練習。<br>ここから自分の投資スタイルを。</p><span class="practice-tag"><span></span> シミュレーション口座</span></div>
     <div class="sidebar-bottom"><button id="reset-account" class="nav-item" title="口座をリセット" aria-label="口座をリセット"><svg viewBox="0 0 24 24"><path d="M4 5v5h5M4.6 9a8 8 0 1 1-.2 6"/></svg>口座をリセット</button><div class="sidebar-version">MANGO Sec. <span>ver. 2.0</span></div></div>
   </aside>
   <main class="workspace">
-    <header class="topbar"><div class="breadcrumb"><span>MANGO Sec.</span><span class="breadcrumb-divider">/</span><strong id="breadcrumb-current">マーケット</strong></div><div class="topbar-actions"><div id="theme-control"></div><div class="auth-controls" id="auth-control"></div></div></header>
+    <header class="topbar"><div class="breadcrumb"><span>MANGO Sec.</span><span class="breadcrumb-divider">/</span><strong id="breadcrumb-current">マーケット</strong></div><div class="topbar-actions"><div id="theme-control"></div><div id="install-control"></div><div class="auth-controls" id="auth-control"></div></div></header>
     <div class="content">
       <div class="page-heading"><div><p class="eyebrow">YOUR NEXT CHAPTER STARTS HERE</p><h1 class="page-title" id="page-title">マーケット</h1><p class="page-subtitle" id="page-subtitle">市場を知る。投資を試す。自分のペースで。</p></div><div class="heading-actions"><span class="today-date" id="today-date"></span><button class="btn btn-secondary" id="refresh-market"><svg viewBox="0 0 24 24"><path d="M20 4v6h-6M4 20v-6h6M5.1 9a7 7 0 0 1 11.6-4.2L20 8M4 16l3.3 3.2A7 7 0 0 0 18.9 15"/></svg>更新</button></div></div>
       <section class="account-access-banner panel" id="account-access"><div class="account-access-copy"><h2 class="panel-title">自分だけの仮想口座で、投資を始めよう。</h2><p id="account-access-message">ログインすると、口座・保有株・取引履歴をサーバーに保存できます。</p></div><button class="btn btn-primary" id="account-signin" data-signin>ChatGPTで登録・ログイン</button></section>

@@ -1,0 +1,35 @@
+{
+  "id": "./",
+  "name": "MANGO Sec.",
+  "short_name": "MANGO Sec.",
+  "description": "日本株と米国株の実際の市場データで学ぶ株取引シミュレーター。",
+  "lang": "ja",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f8fa",
+  "theme_color": "#f7f8fa",
+  "categories": ["finance", "education"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "マーケット",
+      "url": "./#market",
+      "description": "日本株と米国株の市場を確認"
+    }
+  ]
+}
