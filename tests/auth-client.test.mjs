@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAuthAdapter, createApiRequester, apiRequest, apiUrl, ApiError } from '../public/auth-client.js';
+import { AUTH_CONFIG } from '../public/auth-config.js';
 
 const config = {url:'https://example.supabase.co',publishableKey:'public-test-key',storageKey:'mango-sec:supabase:v3',redirectUrl:'https://example.github.io/MANGO-Sec./'};
 const user = {id:'user-1',email:'mango@example.test',user_metadata:{display_name:'Mango'}};
@@ -102,7 +103,29 @@ test('recovery callback is retained until the app can show password update UI; U
 });
 
 test('API paths cannot move a bearer to another origin or outside API routes',()=>{
-  for(const path of ['https://evil.test/api/account','//evil.test/api/account','/api/../auth/start','/api\\evil'])assert.throws(()=>apiUrl(path));
+  for(const path of ['https://evil.test/api/account','//evil.test/api/account','/api/../auth/start','/api/../outside','/api/account/../trades','/api/%2e%2e/outside','/api/account%2freset','/api/account#outside','/api\\evil'])assert.throws(()=>apiUrl(path));
+});
+
+test('only exact account routes use the fixed function and receive its public API key',async()=>{
+  const functionBase='https://wqczekzebhukjayyhuln.supabase.co/functions/v1/mango-sec-api';
+  const marketBase='https://mango-sec-trading.azumaishow781.chatgpt.site';
+  const calls=[];
+  const request=createApiRequester({fetcher:async(url,options)=>{calls.push({url,headers:options.headers});return new Response('{}');}});
+  for(const path of ['/api/account','/api/trades','/api/account/reset','/api/watchlist','/api/session']){
+    assert.equal(apiUrl(path+'?check=a%2Fb&next=%2Fapi%2Fstocks'),functionBase+path+'?check=a%2Fb&next=%2Fapi%2Fstocks');
+    await request(path,{auth:false});
+    assert.equal(calls.at(-1).url,functionBase+path);
+    assert.equal(calls.at(-1).headers.apikey,AUTH_CONFIG.publishableKey);
+  }
+  for(const path of ['/api/stocks','/api/market?symbol=NVDA&range=1d','/api/account/','/api/account/extra','/api/trades-old','/api/Account']){
+    assert.equal(apiUrl(path),marketBase+path);
+    await request(path,{auth:false});
+    assert.equal(calls.at(-1).url,marketBase+path);
+    assert.equal(calls.at(-1).headers.apikey,undefined);
+  }
+  const sent=calls.length;
+  await assert.rejects(request('https://evil.test/api/account',{auth:false}),TypeError);
+  assert.equal(calls.length,sent);
 });
 
 test('unreadable successful API response leaves a mutation outcome uncertain',async()=>{

@@ -13,6 +13,9 @@ function configuredBase() {
   } catch { return DEFAULT_API_BASE; }
 }
 export const API_BASE = configuredBase();
+const ACCOUNT_API_PATHS = new Set(['/api/account','/api/trades','/api/account/reset','/api/watchlist','/api/session']);
+const accountApiBase = new URL(AUTH_CONFIG.accountApiUrl);
+if (accountApiBase.origin !== new URL(AUTH_CONFIG.url).origin || accountApiBase.protocol !== 'https:' || accountApiBase.pathname !== '/functions/v1/mango-sec-api' || accountApiBase.username || accountApiBase.password || accountApiBase.search || accountApiBase.hash) throw new TypeError('口座APIの設定が不正です。');
 
 export class ApiError extends Error {
   constructor(message, status = 0, code = null, uncertain = false) {
@@ -322,18 +325,22 @@ export function clearAuth(...args) { return adapter?.clearAuth(...args); }
 export const hasSession = () => adapter?.hasSession() || false;
 export const getSessionUser = () => adapter?.getSessionUser() || null;
 
-/** API callers may pass only a path on this app's backend, never another origin. */
-export function apiUrl(path) {
+/** API callers may pass only app paths; account routes have a fixed function target. */
+function apiEndpoint(path) {
   if (typeof path !== 'string' || !/^\/api(?:\/|\?|$)/.test(path) || path.includes('\\')) throw new TypeError('APIパスが不正です。');
   const url = new URL(path,API_BASE);
-  if (url.origin !== API_BASE || !/^\/api(?:\/|$)/.test(url.pathname)) throw new TypeError('APIパスが不正です。');
-  return url.href;
+  const rawPath = path.split(/[?#]/,1)[0];
+  if (url.origin !== API_BASE || !/^\/api(?:\/|$)/.test(url.pathname) || url.pathname !== rawPath || url.hash || /%(?:2f|5c)/i.test(rawPath)) throw new TypeError('APIパスが不正です。');
+  const account = ACCOUNT_API_PATHS.has(url.pathname);
+  return {url:account ? `${accountApiBase.href}${url.pathname}${url.search}` : url.href,account};
 }
+export const apiUrl = path => apiEndpoint(path).url;
 
 export function createApiRequester({authAdapter,fetcher = (...args) => fetch(...args)} = {}) {
   return async function request(path,{method='GET',body,auth=true,signal}={}) {
-    const url = apiUrl(path);
+    const {url,account} = apiEndpoint(path);
     const headers = {Accept:'application/json'};
+    if (account) headers.apikey = AUTH_CONFIG.publishableKey;
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     const selected = auth ? (typeof authAdapter === 'function' ? authAdapter() : authAdapter) : null;
     let requestContext = null;

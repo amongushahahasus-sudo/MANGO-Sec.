@@ -1,5 +1,5 @@
 /* Public app shell only. Account, authentication and market responses stay online. */
-const CACHE_NAME = 'mango-sec-v3-static-1';
+const CACHE_NAME = 'mango-sec-v3-static-2';
 const APP_SCOPE = new URL(self.registration.scope);
 const SHELL_FILES = [
   './', './index.html', './styles.css', './app.js', './theme.js', './charts.js',

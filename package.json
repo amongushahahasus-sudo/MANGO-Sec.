@@ -11,7 +11,8 @@
     "dev": "node server.mjs",
     "start": "node server.mjs",
     "test": "node --test",
-    "build": "node scripts/embed-worker.mjs && bash scripts/build.sh && node scripts/validate-artifact.mjs",
-    "db:generate": "node scripts/generate-migrations.mjs"
+    "build": "node scripts/prepare-edge-function.mjs && node scripts/embed-worker.mjs && bash scripts/build.sh && node scripts/validate-artifact.mjs",
+    "db:generate": "node scripts/generate-migrations.mjs",
+    "check:live": "node scripts/check-live-deployment.mjs"
   }
 }

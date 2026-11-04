@@ -1,9 +1,10 @@
 # MANGO Sec.
 
-日本株・米国株の実際の相場データで学ぶ、公開Webアプリです。画面はGitHub Pages、Google・メール認証はSupabase、相場API・口座保存はSitesのCloudflare WorkerとD1で動作します。実際の注文や送金は行いません。
+日本株・米国株の実際の相場データで学ぶ、公開Webアプリです。画面はGitHub Pages、Google・メール認証と現在の株式口座API・保存はSupabaseで動作します。市場画面のデータは既存のSites APIから取得します。実際の注文や送金は行いません。
 
 - 公開アプリ: https://amongushahahasus-sudo.github.io/MANGO-Sec./
-- API: https://mango-sec-trading.azumaishow781.chatgpt.site
+- 口座API: https://wqczekzebhukjayyhuln.supabase.co/functions/v1/mango-sec-api
+- 市場API: https://mango-sec-trading.azumaishow781.chatgpt.site
 
 ## 機能
 
@@ -30,17 +31,17 @@ npm run build
 
 `npm run db:generate` は `db/schema.sql` をSQLiteで検証し、初回のSQLと標準Drizzle形式のジャーナルを生成します。既存の適用済みマイグレーションは上書きしません。以後のスキーマ変更は新しい番号のSQLとジャーナル項目を追加してください。
 
-`npm run build` は外部依存なしで単一Workerモジュールと `dist/.openai/drizzle/` のマイグレーションを生成・検証します。GitHub Actionsでテスト・ビルドを確認し、`public/` をGitHub Pagesへ配信します。API変更はSitesへの別デプロイが必要です。GitHub PagesだけでDBや認証APIは実行できません。
+`npm run build` は外部依存なしで単一Workerモジュールと `dist/.openai/drizzle/` のマイグレーションを生成・検証します。GitHub Actionsでテスト・ビルドを確認し、`public/` をGitHub Pagesへ配信します。口座API変更はSupabase Edge Functionの別デプロイが必要です。市場APIの変更はSitesへ反映します。GitHub PagesだけでDBや認証APIは実行できません。
 
 ## 認証・保存
 
-Google・メール認証にはMANGO FXと共通のSupabase Authを使用します。PKCE認証、セッション更新、パスワード処理は公式SDKが担当します。Sec専用キーでブラウザー内にログイン状態を保存し、APIは照会済みの利用者IDでD1口座を分離します。パスワードや秘密キーをSecのサーバーやGitHubへ保存しません。共有端末では利用後にログアウトしてください。以前のChatGPT認証用テーブルとAPIは既存データを保持するため残していますが、現在の登録画面では使いません。
+Google・メール認証にはMANGO FXと共通のSupabase Authを使用します。PKCE認証、セッション更新、パスワード処理は公式SDKが担当します。Sec専用キーでブラウザー内にログイン状態を保存し、APIは照会済みの利用者IDでSupabaseの株式口座を分離します。パスワードや秘密キーをSecのサーバーやGitHubへ保存しません。共有端末では利用後にログアウトしてください。以前のChatGPT認証用テーブルとAPIは既存データを保持するため残していますが、現在の登録画面では使いません。
 
 口座APIは確認済み利用者IDでレコードを分離します。売買はサーバーが取得した株価で計算します。口座の更新番号と注文IDを使い、同時操作や応答不明時の二重約定を防ぎます。GitHub Pagesの指定オリジンだけにCORSを許可します。
 
 以前のブラウザー内口座は自動でサーバーにアップロードしません。新しいログイン口座は初期資金から開始します。テーマとチャート表示、未ログイン時のウォッチリストはブラウザー設定です。
 
-D1テーブルは `mango_accounts`、`mango_login_codes`、`mango_sessions` です。`.openai/hosting.json` の `d1: "DB"` をSitesが用意します。マイグレーションは配信前に適用し、HTTP要求の処理中にテーブルを作成しません。
+.openaiに記録されているD1テーブル `mango_accounts`、`mango_login_codes`、`mango_sessions` は以前の認証方式のデータを保持します。現在の株式口座はSupabaseの `public.mango_sec_accounts` に保存します。`.openai/hosting.json` の `d1: "DB"` をSitesが用意します。マイグレーションは配信前に適用し、HTTP要求の処理中にテーブルを作成しません。
 
 ## 相場データとシミュレーションの範囲
 
@@ -69,3 +70,11 @@ SecとFXは認証会員を共通にし、端末内のログイン保存キーと
 以前のChatGPT認証口座は削除しませんが、メールの一致による自動統合は行いません。新しいGoogle・メール認証のSec口座は初期資金から開始します。現在の画面ではGoogle・メール認証を使用します。
 
 実際のGoogle認証完了、メールの配送、端末へのホーム画面追加は、利用者の端末で確認してください。確認メールやパスワード再設定リンクは、手続きを始めたブラウザーで開くとPKCE認証を完了できます。別のブラウザーで開いた場合は、案内に従い元のブラウザーで開くかメールアドレスでログインしてください。
+
+## 口座APIの公開方法
+
+現在の口座APIは `supabase/functions/mango-sec-api/` のSupabase Edge Functionです。`verify_jwt:false` とし、関数自身がSupabase Authの `/auth/v1/user` へ照会して本人確認を行います。公開ヘルスチェックと相場取得以外は認証が必要です。
+
+`SUPABASE_SERVICE_ROLE_KEY` はSupabaseが関数サーバーに用意する環境変数からだけ取得します。ブラウザーやGitHubには値を記録しません。確認済みUUIDで全ての保存先を限定し、サーバー価格、更新番号、注文IDを確認してから口座を書き換えます。匿名利用者は保存先を読めず、認証済み利用者もテーブルへ直接書き込めません。SQL定義は `supabase/sec-accounts.sql` です。
+
+`npm run build` は共通の売買計算・相場取得モジュールを関数フォルダーへコピーします。関数の公開はSupabaseのデプロイ機能で行います。GitHub Pagesの公開後、Actionsが `npm run check:live` を実行し、公開ファイル、実DB接続、CORS、未認証・不正トークン拒否、匿名DB読取拒否、実相場取得を確認します。実ユーザーへのメール送信やログインはこの検証では行いません。
