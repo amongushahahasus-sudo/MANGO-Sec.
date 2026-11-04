@@ -10,3 +10,6 @@ cp "$project_root/worker/index.js" "$dist_root/server/index.js"
 cp "$project_root/.openai/hosting.json" "$dist_root/.openai/hosting.json"
 
 echo "Built $dist_root"
+
+mkdir -p "$dist_root/.openai/drizzle"
+cp -R "$project_root/drizzle/." "$dist_root/.openai/drizzle/"

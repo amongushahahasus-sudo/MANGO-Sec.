@@ -1,10 +1,13 @@
 import { createAccount, executeTrade, calculatePortfolio, validateAccount } from './trading.js';
+import { initTheme } from './theme.js';
+import { renderMarketChart } from './charts.js';
+import { apiRequest, apiUrl, beginSignIn, completeSignIn, hasSession, clearAuth, signOut } from './auth-client.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
-const STORAGE_KEY = 'mango-sec:account:v1';
 const WATCH_KEY = 'mango-sec:watchlist:v1';
+const PENDING_TRADE_KEY='mango-sec:pending-trade:v2';
 const catalog = [
   {symbol:'285A.T',name:'キオクシア',currency:'JPY',market:'JP',code:'285A',googleFinanceUrl:'https://www.google.com/finance/quote/285A:TYO',color:'#7f65a9',mark:'K'},
   {symbol:'9020.T',name:'JR東日本',currency:'JPY',market:'JP',code:'9020',googleFinanceUrl:'https://www.google.com/finance/quote/9020:TYO',color:'#2e8b62',mark:'JR'},
@@ -14,31 +17,16 @@ const catalog = [
   {symbol:'AAPL',name:'Apple',currency:'USD',market:'US',code:'AAPL',googleFinanceUrl:'https://www.google.com/finance/quote/AAPL:NASDAQ',color:'#647080',mark:'A'},
   {symbol:'MSFT',name:'Microsoft',currency:'USD',market:'US',code:'MSFT',googleFinanceUrl:'https://www.google.com/finance/quote/MSFT:NASDAQ',color:'#5b8fbc',mark:'M'},
 ];
-const state = {stocks:catalog, market:'JP', view:'market', selected:'285A.T', range:'1mo', side:'buy', orderPreparing:false, orderGeneration:0, quotes:{}, data:null, loading:false, error:null, watched:new Set(), detailRequest:0, pending:null, toastTimer:null};
+const state = {stocks:catalog, market:'JP', view:'market', selected:'285A.T', range:'1mo', side:'buy', chartMode:'line', orderPreparing:false, orderGeneration:0, quotes:{}, data:null, loading:false, error:null, watched:new Set(), detailRequest:0, pending:null, toastTimer:null, user:null, accountLoading:true, accountVersion:null, mutationBusy:false, watchSaving:false, uncertainTrade:null,authGeneration:0};
 let account=createAccount();
-let accountRecoveryRequired=false;
-let storageIssue=null;
-function showStorageIssue(kind) {
-  storageIssue=kind;
-  const banner=$('#storage-error');
-  banner.hidden=false;
-  if(kind==='corrupt') banner.innerHTML='保存された口座データを読み込めませんでした。元の保存内容は変更せず、初期口座を表示しています。取引を始めるには口座をリセットしてください。 <button class="btn btn-ghost" data-reset-account>口座をリセット</button>';
-  else banner.textContent='ブラウザーへの保存が利用できません。取引内容はこの画面を閉じると失われる場合があります。';
-}
-let savedAccount=null;
-try { savedAccount=localStorage.getItem(STORAGE_KEY); }
-catch { showStorageIssue('unavailable'); }
-if(savedAccount) {
-  try {
-    const parsed=JSON.parse(savedAccount);
-    if(!validateAccount(parsed))throw new Error('invalid account');
-    account=parsed;
-  } catch { accountRecoveryRequired=true;showStorageIssue('corrupt'); }
-}
+let chartCleanup=null;
 try {
   const watched=JSON.parse(localStorage.getItem(WATCH_KEY)||'[]');
-  if(Array.isArray(watched))state.watched=new Set(watched.filter((item)=>typeof item==='string'));
-} catch { /* A damaged watchlist does not replace a valid trading account. */ }
+  if(Array.isArray(watched))state.watched=new Set(watched.filter(item=>typeof item==='string'));
+  const mode=localStorage.getItem('mango-sec:chart-type:v1');
+  if(mode==='candlestick')state.chartMode=mode;
+} catch { /* Optional device preferences do not prevent account access. */ }
+initTheme({mount:'#theme-control'});
 
 const iconStar = (filled = false) => `<svg viewBox="0 0 24 24" ${filled ? 'class="star-filled"' : ''} aria-hidden="true"><path d="m12 3 2.8 5.8 6.4.9-4.6 4.5 1.1 6.3-5.7-3-5.7 3 1.1-6.3L2.8 9.7l6.4-.9Z"/></svg>`;
 const currencyFormat = (value, currency = 'JPY', compact = false) => {
@@ -62,19 +50,61 @@ function notify(message) {
   clearTimeout(state.toastTimer);
   state.toastTimer = setTimeout(() => $('#toast').hidden = true, 4200);
 }
-function persist() {
-  try { localStorage.setItem(STORAGE_KEY,JSON.stringify(account));storageIssue=null;$('#storage-error').hidden=true;return true; }
-  catch { showStorageIssue('unavailable');return false; }
+function showAccountError(message) {
+  $('#storage-error').textContent=message;
+  $('#storage-error').hidden=!message;
 }
-function saveWatchlist() {
-  try { localStorage.setItem(WATCH_KEY,JSON.stringify([...state.watched])); }
-  catch { notify('ウォッチリストをブラウザーに保存できませんでした。'); }
+function resetDisplayedAccount() {
+  state.authGeneration++;
+  try{sessionStorage.removeItem(PENDING_TRADE_KEY);}catch{}
+  account=createAccount();state.user=null;state.accountVersion=null;state.pending=null;state.uncertainTrade=null;state.orderGeneration++;
+  $('#confirm-dialog').close();
+  state.watched=new Set();
+  try {const saved=JSON.parse(localStorage.getItem(WATCH_KEY)||'[]');if(Array.isArray(saved))state.watched=new Set(saved.filter(value=>typeof value==='string'));}catch{}
+}
+function applyAccount(data,generation=state.authGeneration) {
+  if(generation!==state.authGeneration||!hasSession())return false;
+  if(!data||!validateAccount(data.account)||!Number.isSafeInteger(data.version)||(!data.user||typeof data.user.id!=='string'))throw new Error('口座データを読み込めませんでした。再度ログインしてください。');
+  if(state.accountVersion!==null&&data.version<state.accountVersion)return false;
+  account=data.account;state.accountVersion=data.version;state.user=data.user;
+  state.watched=new Set(Array.isArray(data.watchlist)?data.watchlist:[]);
+  showAccountError('');
+  renderAccount();renderOrder();renderList();renderPortfolio();renderHistory();
+  return true;
+}
+async function reloadAccount() {
+  if(!hasSession()){resetDisplayedAccount();renderAccount();renderOrder();renderPortfolio();renderHistory();return;}
+  const generation=state.authGeneration;
+  try {applyAccount(await apiRequest('/api/account'),generation);}
+  catch(error){if(error.status===401){resetDisplayedAccount();}throw error;}
+}
+async function saveWatchlist(next) {
+  if(!state.user){state.watched=next;try{localStorage.setItem(WATCH_KEY,JSON.stringify([...next]));}catch{notify('このブラウザーにウォッチリストを保存できませんでした。');}return;}
+  if(state.watchSaving||state.mutationBusy||state.uncertainTrade){notify('口座の更新が終わってから再度お試しください。');return;}
+  state.watchSaving=true;renderOrder();const generation=state.authGeneration;
+  try{applyAccount(await apiRequest('/api/watchlist',{method:'PATCH',body:{symbols:[...next],expectedVersion:state.accountVersion}}),generation);}
+  catch(error){if(error.status===409)await reloadAccount().catch(()=>{});if(error.status===401)resetDisplayedAccount();notify(error.message);}
+  finally{state.watchSaving=false;renderList();renderDetail();renderOrder();}
+}
+function renderAuth() {
+  const root=$('#auth-control');
+  root.innerHTML=state.accountLoading?'<span class="auth-user">口座を確認中…</span>':state.user?`<span class="auth-user" title="${escapeHtml(state.user.displayName||'')}" aria-label="ログイン中のアカウント">${escapeHtml(state.user.displayName||'アカウント')}</span><button class="btn btn-secondary" data-signout>ログアウト</button>`:'<button class="btn btn-secondary" data-signin>ChatGPTで登録・ログイン</button>';
+  $('#account-access').hidden=Boolean(state.user);
+  $('#account-access-message').textContent=state.accountLoading?'アカウントを確認しています。市場データはログイン前でも閲覧できます。':'ログインすると、ご自分の仮想口座・保有株・取引履歴をサーバーに保存して、別の端末でも利用できます。';
+  $('#account-signin').disabled=state.accountLoading;
+  $('#reset-account').disabled=!state.user||state.mutationBusy||state.watchSaving||Boolean(state.uncertainTrade);
+}
+async function startLogin() {try{await beginSignIn();}catch(error){notify(error.message);showAccountError(error.message);}}
+async function logOut() {
+  state.mutationBusy=true;resetDisplayedAccount();renderAccount();renderOrder();renderPortfolio();renderHistory();
+  try{await signOut();}catch(error){clearAuth();notify(error.message);}
+  finally{state.mutationBusy=false;renderAccount();renderOrder();}
 }
 async function fetchMarket(symbol, range = '1mo') {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(),18000);
   try {
-    const response = await fetch(`/api/market?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`,{signal:controller.signal,cache:'no-store'});
+    const response = await fetch(apiUrl(`/api/market?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}`),{signal:controller.signal,cache:'no-store'});
     let data;
     try { data = await response.json(); } catch { throw new Error('市場データの応答を読み取れませんでした。'); }
     if (!response.ok || data.error) throw new Error(typeof data.error === 'string' ? data.error : data.error?.message || data.message || '市場データを取得できませんでした。');
@@ -105,46 +135,19 @@ function rangeButtons() {
   return [['1d','1日'],['5d','1週'],['1mo','1か月'],['3mo','3か月'],['1y','1年']].map(([range,label])=>`<button class="range-button ${range === state.range ? 'active' : ''}" data-range="${range}" aria-pressed="${range === state.range}">${label}</button>`).join('');
 }
 function renderDetail() {
+  chartCleanup?.();chartCleanup=null;
   const stock = selectedStock();
   const data = state.data;
   const quote = data?.quote;
   const link = stock.googleFinanceUrl || `https://www.google.com/finance/quote/${encodeURIComponent(stockCode(stock))}:${stock.currency === 'JPY' ? 'TYO' : 'NASDAQ'}`;
-  $('#stock-detail').innerHTML = `<div class="quote-header"><div class="quote-identity">${logo(stock,'large')}<div><div class="quote-name-row"><h2>${escapeHtml(stock.name)}</h2><button class="watch-button ${state.watched.has(stock.symbol) ? 'watching' : ''}" data-watch="${escapeHtml(stock.symbol)}" aria-label="ウォッチリスト${state.watched.has(stock.symbol) ? 'から削除' : 'に追加'}" aria-pressed="${state.watched.has(stock.symbol)}">${iconStar(state.watched.has(stock.symbol))}</button></div><p>${escapeHtml(stockCode(stock))}<span>·</span>${stock.currency === 'JPY' ? '東京証券取引所' : 'NASDAQ'}<span>·</span>${escapeHtml(stock.currency)}</p></div></div><div class="quote-price">${currencyFormat(quote?.price,stock.currency)}</div><div class="quote-change ${changeClass(quote?.changePercent)}">${Number.isFinite(quote?.change) ? `${quote.change > 0 ? '+' : ''}${currencyFormat(quote.change,stock.currency)}` : '—'} <span>(${changeLabel(quote?.changePercent)})</span><span class="quote-change-note">前日比</span></div></div><div class="chart-toolbar"><span class="chart-label">株価チャート</span><div class="range-tabs" role="group" aria-label="チャートの期間">${rangeButtons()}</div></div><div class="chart-container" id="chart-container">${state.loading ? '<div class="chart-empty"><span class="loading-spinner"></span><p>市場データを取得しています</p></div>' : state.error ? `<div class="chart-empty error-state"><span class="empty-icon">↻</span><strong>データを取得できませんでした</strong><p>${escapeHtml(state.error)}</p><button class="btn btn-secondary" id="retry-data">再取得する</button><a class="link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Google Financeで確認 ↗</a></div>` : '<div id="chart-svg"></div><div class="chart-tooltip" id="chart-tooltip" hidden></div>'}</div><div class="chart-footer"><span><i class="legend-dot"></i>${data ? escapeHtml(data.source || 'Yahoo Finance') : 'Yahoo Finance'}${quote ? ` · 価格時刻 ${escapeHtml(formatTime(quote.asOf))}` : ''}</span><a class="link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Google Finance ↗</a></div>${quote ? `<div class="quote-stats"><div class="quote-stat"><span>前日終値</span><strong>${currencyFormat(quote.previousClose,stock.currency)}</strong></div><div class="quote-stat"><span>始値</span><strong>${currencyFormat(quote.open,stock.currency)}</strong></div><div class="quote-stat"><span>日中高値</span><strong>${currencyFormat(quote.dayHigh ?? quote.high,stock.currency)}</strong></div><div class="quote-stat"><span>日中安値</span><strong>${currencyFormat(quote.dayLow ?? quote.low,stock.currency)}</strong></div></div><p class="fetched-at">取得 ${escapeHtml(formatTime(data.fetchedAt))}${data.delayNotice ? ` · ${escapeHtml(data.delayNotice)}` : ''}</p>` : ''}`;
+  $('#stock-detail').innerHTML = `<div class="quote-header"><div class="quote-identity">${logo(stock,'large')}<div><div class="quote-name-row"><h2>${escapeHtml(stock.name)}</h2><button class="watch-button ${state.watched.has(stock.symbol) ? 'watching' : ''}" data-watch="${escapeHtml(stock.symbol)}" aria-label="ウォッチリスト${state.watched.has(stock.symbol) ? 'から削除' : 'に追加'}" aria-pressed="${state.watched.has(stock.symbol)}">${iconStar(state.watched.has(stock.symbol))}</button></div><p>${escapeHtml(stockCode(stock))}<span>·</span>${stock.currency === 'JPY' ? '東京証券取引所' : 'NASDAQ'}<span>·</span>${escapeHtml(stock.currency)}</p></div></div><div class="quote-price">${currencyFormat(quote?.price,stock.currency)}</div><div class="quote-change ${changeClass(quote?.changePercent)}">${Number.isFinite(quote?.change) ? `${quote.change > 0 ? '+' : ''}${currencyFormat(quote.change,stock.currency)}` : '—'} <span>(${changeLabel(quote?.changePercent)})</span><span class="quote-change-note">前日比</span></div></div><div class="chart-toolbar"><div class="chart-type-control" role="group" aria-label="チャートの種類"><button data-chart-mode="line" class="${state.chartMode==='line'?'active':''}" aria-pressed="${state.chartMode==='line'}">折れ線</button><button data-chart-mode="candlestick" class="${state.chartMode==='candlestick'?'active':''}" aria-pressed="${state.chartMode==='candlestick'}">ローソク足</button></div><div class="range-tabs" role="group" aria-label="チャートの期間">${rangeButtons()}</div></div><div class="chart-container" id="chart-container">${state.loading ? '<div class="chart-empty"><span class="loading-spinner"></span><p>市場データを取得しています</p></div>' : state.error ? `<div class="chart-empty error-state"><span class="empty-icon">↻</span><strong>データを取得できませんでした</strong><p>${escapeHtml(state.error)}</p><button class="btn btn-secondary" id="retry-data">再取得する</button><a class="link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Google Financeで確認 ↗</a></div>` : '<div id="chart-svg"></div>'}</div><div class="chart-footer"><span><i class="legend-dot"></i>${data ? escapeHtml(data.source || 'Yahoo Finance') : 'Yahoo Finance'}${quote ? ` · 価格時刻 ${escapeHtml(formatTime(quote.asOf))}` : ''}</span><a class="link" href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">Google Finance ↗</a></div>${quote ? `<div class="quote-stats"><div class="quote-stat"><span>前日終値</span><strong>${currencyFormat(quote.previousClose,stock.currency)}</strong></div><div class="quote-stat"><span>始値</span><strong>${currencyFormat(quote.open,stock.currency)}</strong></div><div class="quote-stat"><span>日中高値</span><strong>${currencyFormat(quote.dayHigh ?? quote.high,stock.currency)}</strong></div><div class="quote-stat"><span>日中安値</span><strong>${currencyFormat(quote.dayLow ?? quote.low,stock.currency)}</strong></div></div><p class="fetched-at">取得 ${escapeHtml(formatTime(data.fetchedAt))}${data.delayNotice ? ` · ${escapeHtml(data.delayNotice)}` : ''}</p>` : ''}`;
   if (!state.loading && !state.error && data) renderChart(data.history || [],stock.currency);
 }
 function renderChart(history,currency) {
-  const chartRoot = $('#chart-svg');
-  if (!chartRoot) return;
-  const points = history.filter((point) => Number.isFinite(point.time) && Number.isFinite(point.close) && point.close > 0).sort((a,b)=>a.time-b.time);
-  if (points.length < 2) {
-    chartRoot.innerHTML = '<div class="chart-empty"><span class="empty-icon">⌁</span><strong>この期間のチャートはありません</strong><p>ほかの期間を選択してください。</p></div>';
-    return;
-  }
-  const width=640,height=255,left=12,right=66,top=18,bottom=33;
-  const low=Math.min(...points.map((p)=>p.close)),high=Math.max(...points.map((p)=>p.close));
-  const padding=Math.max((high-low)*.18,high*.003);
-  const min=low-padding,max=high+padding;
-  const first=points[0].time,last=points[points.length-1].time;
-  const x=(point)=>left+(point.time-first)/(last-first)*(width-left-right);
-  const y=(value)=>top+(max-value)/(max-min)*(height-top-bottom);
-  const path=points.map((point,index)=>`${index ? 'L' : 'M'}${x(point).toFixed(2)},${y(point.close).toFixed(2)}`).join(' ');
-  const grid=Array.from({length:4},(_,index)=>{const value=max-(max-min)*index/3;return `<line x1="${left}" y1="${y(value)}" x2="${width-right}" y2="${y(value)}" stroke="#edf0f2" stroke-dasharray="3 4"/><text x="${width-right+12}" y="${y(value)+4}" fill="#96a0ac" font-size="11">${formatNumber(value,currency === 'JPY' ? 0 : 2)}</text>`;}).join('');
-  const labels=Array.from({length:4},(_,index)=>{const point=points[Math.round((points.length-1)*index/3)];const date=parseTime(point.time);const text=state.range==='1d'?new Intl.DateTimeFormat('ja-JP',{timeZone:currency==='JPY'?'Asia/Tokyo':'America/New_York',hour:'2-digit',minute:'2-digit',hour12:false}).format(date):new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',month:'numeric',day:'numeric'}).format(date);return `<text x="${x(point)}" y="${height-7}" fill="#96a0ac" font-size="11" text-anchor="${index===0?'start':index===3?'end':'middle'}">${text}</text>`;}).join('');
-  chartRoot.innerHTML=`<svg class="price-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(selectedStock().name)}の実際の株価チャート。${points.length}件の価格データ。"><defs><linearGradient id="chart-fill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f7a344" stop-opacity=".18"/><stop offset="100%" stop-color="#f7a344" stop-opacity="0"/></linearGradient></defs>${grid}<path d="${path} L${x(points[points.length-1])},${height-bottom} L${left},${height-bottom} Z" fill="url(#chart-fill)"/><path d="${path}" fill="none" stroke="#ee9b39" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${labels}<line id="chart-crosshair" x1="0" x2="0" y1="${top}" y2="${height-bottom}" stroke="#9aa3ae" stroke-dasharray="3 3" visibility="hidden"/><circle id="chart-dot" r="4.5" fill="#ee9b39" stroke="white" stroke-width="2" visibility="hidden"/><rect id="chart-hit" x="${left}" y="${top}" width="${width-left-right}" height="${height-top-bottom}" fill="transparent"/></svg>`;
-  const svg=$('.price-chart'),hit=$('#chart-hit'),tooltip=$('#chart-tooltip');
-  const move=(event)=>{
-    const bounds=svg.getBoundingClientRect();
-    const localX=(event.clientX-bounds.left)/bounds.width*width;
-    const target=first+Math.max(0,Math.min(1,(localX-left)/(width-left-right)))*(last-first);
-    const point=points.reduce((best,item)=>Math.abs(item.time-target)<Math.abs(best.time-target)?item:best,points[0]);
-    const position=x(point),vertical=y(point.close);
-    $('#chart-crosshair').setAttribute('x1',position);$('#chart-crosshair').setAttribute('x2',position);$('#chart-crosshair').setAttribute('visibility','visible');
-    $('#chart-dot').setAttribute('cx',position);$('#chart-dot').setAttribute('cy',vertical);$('#chart-dot').setAttribute('visibility','visible');
-    tooltip.innerHTML=`<span>${escapeHtml(formatTime(point.time))}</span><strong>${currencyFormat(point.close,currency)}</strong>`;
-    tooltip.style.left=`${Math.min(74,Math.max(4,position/width*100))}%`;tooltip.style.top='2px';tooltip.hidden=false;
-  };
-  hit.addEventListener('pointermove',move);
-  hit.addEventListener('pointerleave',()=>{tooltip.hidden=true;$('#chart-crosshair').setAttribute('visibility','hidden');$('#chart-dot').setAttribute('visibility','hidden');});
+  chartCleanup?.();chartCleanup=null;
+  const root=$('#chart-svg');if(!root)return;
+  const stock=selectedStock();
+  chartCleanup=renderMarketChart({root,history,currency,symbol:stock.symbol,name:stock.name,range:state.range,mode:state.chartMode});
 }
 async function loadDetail() {
   const request=++state.detailRequest;
@@ -167,10 +170,11 @@ async function refreshList() {
   renderAccount();
 }
 function renderAccount() {
-  $('#balance-jpy').innerHTML=`${currencyFormat(account.cash.JPY,'JPY')}<span>JPY</span>`;
-  $('#balance-usd').innerHTML=`${currencyFormat(account.cash.USD,'USD')}<span>USD</span>`;
-  $('#holdings-count').innerHTML=`${account.positions.length}<span>銘柄保有</span>`;
-  $('#trade-count').textContent=account.transactions.length?`${formatNumber(account.transactions.length)}回の取引を経験しました`:'最初の取引をはじめましょう';
+  $('#balance-jpy').innerHTML=state.user?`${currencyFormat(account.cash.JPY,'JPY')}<span>JPY</span>`:'—<span>JPY</span>';
+  $('#balance-usd').innerHTML=state.user?`${currencyFormat(account.cash.USD,'USD')}<span>USD</span>`:'—<span>USD</span>';
+  $('#holdings-count').innerHTML=state.user?`${account.positions.length}<span>銘柄保有</span>`:'—<span>銘柄保有</span>';
+  $('#trade-count').textContent=state.user?(account.transactions.length?`${formatNumber(account.transactions.length)}回の取引を経験しました`:'最初の取引をはじめましょう'):'登録時の仮想資金：1,000万円＋10,000ドル';
+  renderAuth();
 }
 function orderQuantity() {return Number($('#quantity').value);}
 function renderOrder() {
@@ -181,13 +185,14 @@ function renderOrder() {
   $('#order-held').textContent=`${formatNumber(heldQuantity())} 株`;
   $('#order-total').textContent=currencyFormat(validQuantity&&quote?quantity*quote.price:NaN,stock.currency);
   $('#available-label').textContent=state.side==='buy'?'買付余力':'売却可能数量';
-  $('#order-available').textContent=state.side==='buy'?currencyFormat(account.cash[stock.currency],stock.currency):`${formatNumber(heldQuantity())} 株`;
+  $('#order-available').textContent=state.side==='buy'?currencyFormat(state.user?account.cash[stock.currency]:NaN,stock.currency):`${formatNumber(heldQuantity())} 株`;
   let problem='';
-  if(!validQuantity)problem='数量は1〜1,000,000の整数で入力してください。';
+  if(!state.user)problem=state.accountLoading?'口座を確認しています。':'仮想取引には登録・ログインが必要です。';
+  else if(!validQuantity)problem='数量は1〜1,000,000の整数で入力してください。';
   else if(quote && state.side==='buy' && quantity*quote.price>account.cash[stock.currency]+.00001)problem='買付余力が不足しています。';
   else if(state.side==='sell'&&quantity>heldQuantity())problem='保有数量を超えて売却できません。';
   $('#order-feedback').textContent=problem;
-  $('#order-submit').disabled=Boolean(problem)||!quote||state.loading||state.orderPreparing||accountRecoveryRequired||Boolean(state.pending);
+  $('#order-submit').disabled=Boolean(problem)||!quote||state.loading||state.orderPreparing||!state.user||state.mutationBusy||state.watchSaving||Boolean(state.uncertainTrade)||Boolean(state.pending);
   $$('.order-tabs button').forEach((button)=>button.classList.toggle('active',button.dataset.side===state.side));
 }
 function setView(view) {
@@ -201,6 +206,7 @@ function setView(view) {
   const nextHash=`#${view}`;if(location.hash!==nextHash)history.replaceState(null,'',nextHash);
 }
 function renderPortfolio() {
+  if(!state.user){$('#portfolio-content').innerHTML='<div class="empty-state"><h3>ご自分の口座を作成しましょう</h3><p>登録すると保有株と損益を保存できます。</p><button class="btn btn-primary" data-signin>ChatGPTで登録・ログイン</button></div>';return;}
   const portfolio=calculatePortfolio(account,state.quotes);
   const stats=['JPY','USD'].map((currency)=>{
     const row=portfolio.currencies[currency];
@@ -210,12 +216,14 @@ function renderPortfolio() {
   $('#portfolio-content').innerHTML=`<div class="portfolio-summary">${stats}</div>${rows}`;
 }
 async function refreshPortfolio() {
+  if(!state.user)return;
   const button=$('#refresh-portfolio');button.disabled=true;button.textContent='更新中…';
   const results=await Promise.allSettled(account.positions.map((position)=>fetchMarket(position.symbol,'1mo')));
   renderPortfolio();button.disabled=false;button.textContent='評価額を更新';
   if(results.some((result)=>result.status==='rejected'))notify('一部の評価価格を取得できませんでした。再度更新できます。');
 }
 function renderHistory() {
+  if(!state.user){$('#history-total').textContent='—';$('#history-content').innerHTML='<div class="empty-state"><h3>取引履歴はアカウントに保存されます</h3><p>登録して仮想売買を始めましょう。</p><button class="btn btn-primary" data-signin>ChatGPTで登録・ログイン</button></div>';return;}
   $('#history-total').textContent=`${formatNumber(account.transactions.length)} 件`;
   $('#history-content').innerHTML=account.transactions.length?`<div class="table-wrap"><table class="holdings-table"><thead><tr><th>約定日時（日本時間）</th><th>区分</th><th>銘柄</th><th>数量</th><th>約定単価</th><th>約定代金</th><th>実現損益</th></tr></thead><tbody>${account.transactions.map((trade)=>`<tr><td>${escapeHtml(formatTime(trade.executionAt))}<small>価格 ${escapeHtml(formatTime(trade.priceAsOf))}</small></td><td><span class="trade-badge ${trade.side==='buy'?'buy':'sell'}">${trade.side==='buy'?'買付':'売却'}</span></td><td><strong>${escapeHtml(trade.name)}</strong><small>${escapeHtml(trade.symbol)} · ${escapeHtml(trade.source)}</small></td><td>${formatNumber(trade.quantity)} 株</td><td>${currencyFormat(trade.price,trade.currency)}</td><td>${currencyFormat(trade.total,trade.currency)}</td><td class="${changeClass(trade.realizedPnL)}">${trade.side==='sell'?currencyFormat(trade.realizedPnL,trade.currency):'—'}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty-state"><span class="empty-icon">◷</span><h3>ここから、あなたの投資の記録がはじまる。</h3><p>仮想取引の履歴がここに表示されます。<br>実際の市場価格で、売買の流れを試してみましょう。</p><button class="btn btn-primary" data-go-market>最初の取引をはじめる →</button></div>';
 }
@@ -238,44 +246,68 @@ async function prepareOrder(event) {
     const order={stock,side,quantity,quote:data.quote,fetchedAt:data.fetchedAt,source:data.source};
     const preview=executeTrade(account,order);
     const settledTotal=preview.transactions[0].total;
-    state.pending={kind:'trade',order,preparedAt:Date.now()};
+    state.pending={kind:'trade',order,preparedAt:Date.now(),body:{symbol:stock.symbol,side,quantity,expectedVersion:state.accountVersion,requestId:crypto.randomUUID()}};
     $('#dialog-title').textContent=side==='buy'?'買付注文の確認':'売却注文の確認';
     $('#dialog-description').textContent=`${stock.name}を${formatNumber(quantity)}株${side==='buy'?'購入':'売却'}します。`;
-    $('#dialog-summary').innerHTML=`<div class="summary-row"><span>銘柄</span><strong>${escapeHtml(stock.name)} (${escapeHtml(stockCode(stock))})</strong></div><div class="summary-row"><span>数量</span><strong>${formatNumber(quantity)} 株</strong></div><div class="summary-row"><span>仮想約定単価</span><strong>${currencyFormat(data.quote.price,stock.currency)}</strong></div><div class="summary-row"><span>価格時刻</span><strong>${escapeHtml(formatTime(data.quote.asOf))}</strong></div><div class="summary-row"><span>データ取得元</span><strong>${escapeHtml(data.source)}</strong></div><div class="summary-row total"><span>約定代金</span><strong>${currencyFormat(settledTotal,stock.currency)}</strong></div>`;
-    $('#dialog-disclaimer').textContent='表示された市場価格で仮想約定します。市場データには遅延があり、実注文は送信されません。';
+    $('#dialog-summary').innerHTML=`<div class="summary-row"><span>銘柄</span><strong>${escapeHtml(stock.name)} (${escapeHtml(stockCode(stock))})</strong></div><div class="summary-row"><span>数量</span><strong>${formatNumber(quantity)} 株</strong></div><div class="summary-row"><span>確認時の参考価格</span><strong>${currencyFormat(data.quote.price,stock.currency)}</strong></div><div class="summary-row"><span>価格時刻</span><strong>${escapeHtml(formatTime(data.quote.asOf))}</strong></div><div class="summary-row"><span>データ取得元</span><strong>${escapeHtml(data.source)}</strong></div><div class="summary-row total"><span>約定代金</span><strong>${currencyFormat(settledTotal,stock.currency)}</strong></div>`;
+    $('#dialog-disclaimer').textContent='確定時にサーバーで取得した最新の参考価格で仮想約定するため、表示価格と異なる場合があります。実注文は送信されません。';
     $('#dialog-confirm').textContent='仮想注文を確定';$('#dialog-confirm').disabled=false;
     $('#confirm-dialog').showModal();
   } catch(error) {$('#order-feedback').textContent=error.message;notify(error.message);}
   finally {state.orderPreparing=false;$('#order-submit').innerHTML='注文内容を確認 <span>→</span>';renderOrder();}
 }
-function confirmAction() {
-  const pending=state.pending;if(!pending)return;
-  $('#dialog-confirm').disabled=true;
+async function confirmAction() {
+  const pending=state.pending;if(!pending||state.mutationBusy)return;
+  state.mutationBusy=true;$('#dialog-confirm').disabled=true;$('#dialog-cancel').disabled=true;
+  const tokenBefore=hasSession(),generation=state.authGeneration;
   try {
+    if(!state.user||!tokenBefore){const error=new Error('ログインしてからお試しください。');error.status=401;throw error;}
     if(pending.kind==='reset'){
-      account=createAccount();accountRecoveryRequired=false;persist();renderAccount();renderOrder();renderPortfolio();renderHistory();notify('仮想口座をリセットしました。');
-    } else {
-      if(Date.now()-pending.preparedAt>5*60*1000)throw new Error('確認から時間が経過しました。注文内容を再確認してください。');
-      account=executeTrade(account,pending.order);persist();renderAccount();renderOrder();renderPortfolio();renderHistory();
-      notify(`${pending.order.stock.name}を${formatNumber(pending.order.quantity)}株、仮想${pending.order.side==='buy'?'購入':'売却'}しました。`);
+      applyAccount(await apiRequest('/api/account/reset',{method:'POST',body:{expectedVersion:pending.version}}),generation);notify('仮想口座をリセットしました。');
+    }else{
+      try{sessionStorage.setItem(PENDING_TRADE_KEY,JSON.stringify({pending,userId:state.user.id}));}catch{}
+      const data=await apiRequest('/api/trades',{method:'POST',body:pending.body});
+      applyAccount(data,generation);state.uncertainTrade=null;try{sessionStorage.removeItem(PENDING_TRADE_KEY);}catch{}
+      const trade=account.transactions.find(item=>item.id===pending.body.requestId);
+      notify(`${pending.order.stock.name}を${formatNumber(pending.order.quantity)}株、仮想${pending.order.side==='buy'?'購入':'売却'}しました。${trade?`約定単価 ${currencyFormat(trade.price,trade.currency)}`:''}`);
     }
     $('#confirm-dialog').close();state.pending=null;
-  } catch(error){notify(error.message);$('#confirm-dialog').close();state.pending=null;}
-  finally {renderOrder();}
+  }catch(error){
+    if(error.status===401){resetDisplayedAccount();}
+    else if(error.status===409){await reloadAccount().catch(()=>{});state.uncertainTrade=null;try{sessionStorage.removeItem(PENDING_TRADE_KEY);}catch{}state.pending=null;$('#confirm-dialog').close();notify('口座が更新されています。内容を確認して注文し直してください。');return;}
+    else if(pending.kind==='trade'&&(error.uncertain||!error.status||error.status>=500)){
+      state.uncertainTrade=pending;state.pending=null;$('#confirm-dialog').close();
+      showAccountError('注文結果を確認できませんでした。再送前に同じ注文番号で結果を確認してください。');
+      $('#storage-error').insertAdjacentHTML('beforeend',' <button class="btn btn-secondary" data-retry-trade>注文結果を確認</button>');
+      notify('注文結果が不明です。追加注文を止めています。');return;
+    }
+    if(error.status){state.uncertainTrade=null;try{sessionStorage.removeItem(PENDING_TRADE_KEY);}catch{}}
+    notify(error.message);$('#confirm-dialog').close();state.pending=null;
+  }finally{state.mutationBusy=false;$('#dialog-cancel').disabled=false;renderAccount();renderOrder();}
+}
+async function retryUncertainTrade(){
+  if(!state.uncertainTrade||state.mutationBusy)return;
+  state.pending=state.uncertainTrade;await confirmAction();
 }
 function resetDialog() {
+  if(!state.user||state.mutationBusy||state.watchSaving||state.uncertainTrade)return;
   state.orderGeneration++;
-  state.pending={kind:'reset'};
+  state.pending={kind:'reset',version:state.accountVersion};
   $('#dialog-title').textContent='仮想口座をリセット';$('#dialog-description').textContent='買付余力・保有銘柄・取引履歴を初期状態に戻します。';
   $('#dialog-summary').innerHTML='<div class="summary-row"><span>日本円の初期資金</span><strong>¥10,000,000</strong></div><div class="summary-row"><span>米ドルの初期資金</span><strong>$10,000.00</strong></div>';
-  $('#dialog-disclaimer').textContent='現在の保有銘柄と取引履歴は削除されます。この操作は取り消せません。ウォッチリストは保持されます。';
+  $('#dialog-disclaimer').textContent='ログイン中のご自分の口座の保有銘柄と取引履歴を削除します。この操作は取り消せません。ウォッチリストは保持されます。';
   $('#dialog-confirm').textContent='リセットする';$('#dialog-confirm').disabled=false;$('#confirm-dialog').showModal();
 }
 
 document.addEventListener('click',(event)=>{
+  if(event.target.closest('[data-signin]')){startLogin();return;}
+  if(event.target.closest('[data-signout]')){if(!state.mutationBusy)logOut();return;}
+  if(event.target.closest('[data-retry-trade]')){retryUncertainTrade();return;}
+  const chart=event.target.closest('[data-chart-mode]');if(chart){state.chartMode=chart.dataset.chartMode;try{localStorage.setItem('mango-sec:chart-type:v1',state.chartMode);}catch{}renderDetail();return;}
+
   const nav=event.target.closest('[data-view]');if(nav){setView(nav.dataset.view);return;}
   const market=event.target.closest('[data-market]');if(market){state.market=market.dataset.market;$$('.segment').forEach((button)=>button.classList.toggle('active',button===market));const list=visibleStocks();if(list.length&&!list.some((stock)=>stock.symbol===state.selected)){state.selected=list[0].symbol;$('#quantity').value='1';loadDetail();}renderList();refreshList();return;}
-  const watch=event.target.closest('[data-watch]');if(watch){const symbol=watch.dataset.watch;if(state.watched.has(symbol))state.watched.delete(symbol);else state.watched.add(symbol);saveWatchlist();renderList();renderDetail();return;}
+  const watch=event.target.closest('[data-watch]');if(watch){const next=new Set(state.watched),symbol=watch.dataset.watch;if(next.has(symbol))next.delete(symbol);else next.add(symbol);saveWatchlist(next).then(()=>{renderList();renderDetail();});return;}
   const select=event.target.closest('[data-symbol]');if(select){if(select.dataset.symbol!==state.selected){state.selected=select.dataset.symbol;$('#quantity').value='1';renderList();loadDetail();}return;}
   const range=event.target.closest('[data-range]');if(range){if(range.dataset.range!==state.range){state.range=range.dataset.range;loadDetail();}return;}
   const side=event.target.closest('[data-side]');if(side){state.side=side.dataset.side;renderOrder();return;}
@@ -289,21 +321,41 @@ $('#stock-search').addEventListener('input',renderList);
 $('#quantity').addEventListener('input',renderOrder);
 $('#quantity-minus').addEventListener('click',()=>{$('#quantity').value=String(Math.max(1,(orderQuantity()||1)-1));renderOrder();});
 $('#quantity-plus').addEventListener('click',()=>{$('#quantity').value=String(Math.min(1000000,(orderQuantity()||0)+1));renderOrder();});
-$('#quantity-max').addEventListener('click',()=>{const stock=selectedStock(),price=state.data?.quote?.price;const max=state.side==='sell'?heldQuantity():price?Math.floor(account.cash[stock.currency]/price):0;$('#quantity').value=String(Math.min(1000000,Math.max(1,max)));renderOrder();});
+$('#quantity-max').addEventListener('click',()=>{if(!state.user)return;const stock=selectedStock(),price=state.data?.quote?.price;const max=state.side==='sell'?heldQuantity():price?Math.floor(account.cash[stock.currency]/price):0;$('#quantity').value=String(Math.min(1000000,Math.max(1,max)));renderOrder();});
 $('#order-form').addEventListener('submit',prepareOrder);
 $('#refresh-market').addEventListener('click',()=>{if(state.view==='portfolio')refreshPortfolio();else if(state.view==='history')renderHistory();else{loadDetail();refreshList();}});
 $('#refresh-portfolio').addEventListener('click',refreshPortfolio);
 $('#reset-account').addEventListener('click',resetDialog);
-$('#dialog-cancel').addEventListener('click',()=>{$('#confirm-dialog').close();state.pending=null;renderOrder();});
+$('#dialog-cancel').addEventListener('click',()=>{if(state.mutationBusy)return;$('#confirm-dialog').close();state.pending=null;renderOrder();});
 $('#dialog-confirm').addEventListener('click',confirmAction);
-$('#confirm-dialog').addEventListener('cancel',()=>{state.pending=null;renderOrder();});
-window.addEventListener('storage',(event)=>{
-  if(event.key===STORAGE_KEY){try{const updated=JSON.parse(event.newValue||'null');if(validateAccount(updated)){account=updated;accountRecoveryRequired=false;if(storageIssue==='corrupt'){storageIssue=null;$('#storage-error').hidden=true;}state.pending=null;$('#confirm-dialog').close();renderAccount();renderOrder();if(state.view==='portfolio')renderPortfolio();if(state.view==='history')renderHistory();notify('別のタブで口座が更新されました。');}}catch{}}
-});
+$('#confirm-dialog').addEventListener('cancel',(event)=>{if(state.mutationBusy){event.preventDefault();return;}state.pending=null;renderOrder();});
 window.addEventListener('hashchange',()=>{const view=location.hash.slice(1);if(['market','portfolio','watchlist','history'].includes(view))setView(view);});
 $('#today-date').textContent=new Intl.DateTimeFormat('ja-JP',{timeZone:'Asia/Tokyo',year:'numeric',month:'long',day:'numeric',weekday:'short'}).format(new Date());
 $('#copyright-year').textContent=String(new Date().getFullYear());
-renderAccount();renderList();renderOrder();
-setView(['market','portfolio','watchlist','history'].includes(location.hash.slice(1))?location.hash.slice(1):'market');
+renderAccount();renderList();renderOrder();renderPortfolio();renderHistory();
 loadDetail();refreshList();
-fetch('/api/stocks').then((response)=>response.ok?response.json():null).then((data)=>{const stocks=Array.isArray(data)?data:data?.stocks;if(Array.isArray(stocks)&&stocks.length){state.stocks=stocks.map((stock)=>({...catalog.find((entry)=>entry.symbol===stock.symbol),...stock,fullName:stock.name,name:stock.shortName||stock.name}));renderList();refreshList();}}).catch(()=>{});
+async function initialiseAccount(){
+  try{await completeSignIn();if(hasSession()){await reloadAccount();recoverPendingTrade();}}
+  catch(error){showAccountError(error.message);notify(error.message);if(error.status===401)resetDisplayedAccount();}
+  finally{state.accountLoading=false;renderAccount();renderOrder();setView(['market','portfolio','watchlist','history'].includes(location.hash.slice(1))?location.hash.slice(1):'market');}
+}
+function recoverPendingTrade(){
+  if(!state.user)return;
+  let saved;
+  try{saved=JSON.parse(sessionStorage.getItem(PENDING_TRADE_KEY)||'null');}catch{return;}
+  if(!saved||saved.userId!==state.user.id||saved.pending?.kind!=='trade')return;
+  const pending=saved.pending,body=pending.body;
+  if(!body||typeof body.requestId!=='string'||!['buy','sell'].includes(body.side)||!Number.isSafeInteger(body.quantity))return;
+  if(account.transactions.some(trade=>trade.id===body.requestId)){try{sessionStorage.removeItem(PENDING_TRADE_KEY);}catch{}notify('前回の注文は保存されています。取引履歴をご確認ください。');return;}
+  const storedStock=pending.order?.stock;
+  const stock=state.stocks.find(item=>item.symbol===body.symbol)||(storedStock?.symbol===body.symbol&&typeof storedStock.name==='string'&&['JPY','USD'].includes(storedStock.currency)?storedStock:null);if(!stock)return;
+  pending.order={...pending.order,stock,side:body.side,quantity:body.quantity};state.uncertainTrade=pending;
+  showAccountError('前回の注文結果が未確認です。同じ注文番号で結果を確認してください。');
+  $('#storage-error').insertAdjacentHTML('beforeend',' <button class="btn btn-secondary" data-retry-trade>注文結果を確認</button>');
+}
+window.addEventListener('mango:authchange',event=>{if(!event.detail?.authenticated){resetDisplayedAccount();renderAccount();renderOrder();renderPortfolio();renderHistory();}});
+initialiseAccount();
+apiRequest('/api/stocks',{auth:false}).then(data=>{const stocks=Array.isArray(data)?data:data?.stocks;if(Array.isArray(stocks)&&stocks.length){state.stocks=stocks.map(stock=>({...catalog.find(entry=>entry.symbol===stock.symbol),...stock,fullName:stock.name,name:stock.shortName||stock.name}));renderList();refreshList();}}).catch(()=>{});
+window.addEventListener('focus',()=>{if(state.user&&!state.mutationBusy&&!state.pending&&!state.uncertainTrade)reloadAccount().catch(error=>showAccountError(error.message));});
+
+setInterval(()=>{if(state.user&&!state.mutationBusy&&!hasSession()){resetDisplayedAccount();renderAccount();renderOrder();renderPortfolio();renderHistory();showAccountError('ログインの有効期限が切れました。再度ログインしてください。');}},60_000);

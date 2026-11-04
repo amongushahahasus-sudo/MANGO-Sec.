@@ -4,11 +4,14 @@
   "private": true,
   "type": "module",
   "description": "日本株・米国株の実際の相場データで練習する株式取引シミュレーター",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "dev": "node server.mjs",
     "start": "node server.mjs",
     "test": "node --test",
-    "build": "node scripts/embed-worker.mjs && bash scripts/build.sh && node scripts/validate-artifact.mjs"
+    "build": "node scripts/embed-worker.mjs && bash scripts/build.sh && node scripts/validate-artifact.mjs",
+    "db:generate": "node scripts/generate-migrations.mjs"
   }
 }

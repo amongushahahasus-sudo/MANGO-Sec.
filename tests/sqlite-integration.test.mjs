@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFile} from 'node:fs/promises';
+import {handleAuthRoutes,resolveIdentity} from '../src/auth.js';
+import {handleAccountApi} from '../src/accounts.js';
+import {handleApplicationRequest} from '../src/gateway.js';
+const backend='https://mango-sec-trading.azumaishow781.chatgpt.site';
+const origin='https://amongushahahasus-sudo.github.io';
+function d1(database){return {prepare(sql){return {bind(...values){return {async first(){return database.prepare(sql).get(...values)||null;},async run(){const r=database.prepare(sql).run(...values);return {meta:{changes:Number(r.changes)}};}}}}}};}
+test('generated SQL supports real PKCE login, durable account writes, isolation and logout',async()=>{
+ const database=new DatabaseSync(':memory:');database.exec(await readFile(new URL('../drizzle/0000_mango_accounts.sql',import.meta.url),'utf8'));
+ const env={DB:d1(database)};
+ const verifier='v'.repeat(43),state='s'.repeat(32);
+ const challenge=Buffer.from(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier))).toString('base64url');
+ const start=await handleAuthRoutes(new Request(backend+'/auth/start?'+new URLSearchParams({challenge,state}),{headers:{'oai-authenticated-user-id':'alice','oai-authenticated-user-email':'alice@example.test'}}),env);
+ assert.equal(start.status,302);const target=new URL(start.headers.get('Location'));
+ assert.equal(target.origin,origin);const code=new URLSearchParams(target.hash.slice(1)).get('auth_code');
+ const exchange=await handleAuthRoutes(new Request(backend+'/api/auth/exchange',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify({code,verifier})}),env);
+ assert.equal(exchange.status,200);const {token}=await exchange.json();
+ const headers={Origin:origin,Authorization:'Bearer '+token};
+ const account=await handleApplicationRequest(new Request(backend+'/api/account',{headers}),env);
+ assert.equal(account.status,200);const saved=await account.json();assert.equal(saved.account.cash.USD,10000);
+ const identity=await resolveIdentity(new Request(backend,{headers}),env);assert.equal(identity.userId,'alice');
+ const now=Date.now();const trade=await handleAccountApi(new Request(backend+'/api/trades',{method:'POST',headers:{...headers,'Content-Type':'application/json'},body:JSON.stringify({symbol:'NVDA',side:'buy',quantity:2,expectedVersion:saved.version,requestId:crypto.randomUUID()})}),env,identity,{getMarket:async()=>({quote:{price:100,currency:'USD',asOf:new Date(now).toISOString()},fetchedAt:new Date(now).toISOString(),source:'Test provider'})});
+ assert.equal(trade.status,200);assert.equal((await trade.json()).account.cash.USD,9800);
+ const alice=await handleAccountApi(new Request(backend+'/api/account'),env,{userId:'alice'});assert.equal((await alice.json()).account.positions[0].quantity,2);
+ const bob=await handleAccountApi(new Request(backend+'/api/account'),env,{userId:'bob'});assert.equal((await bob.json()).account.positions.length,0);
+ const logout=await handleAuthRoutes(new Request(backend+'/api/auth/logout',{method:'POST',headers}),env);assert.equal(logout.status,200);
+ assert.equal(await resolveIdentity(new Request(backend,{headers}),env),null);
+ database.close();
+});

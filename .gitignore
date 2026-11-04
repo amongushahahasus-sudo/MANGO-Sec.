@@ -7,3 +7,6 @@ worker/index.js
 *.log
 *.tar.gz
 .DS_Store
+
+.npm-cache/
+.wrangler/

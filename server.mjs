@@ -2,15 +2,21 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { handleApi, SECURITY_HEADERS } from './src/market.js';
+import { SECURITY_HEADERS } from './src/market.js';
+import { handleApplicationRequest } from './src/gateway.js';
 
 const publicDirectory = path.resolve(fileURLToPath(new URL('./public/', import.meta.url)));
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json; charset=utf-8', '.webmanifest': 'application/manifest+json' };
 const server = http.createServer(async (incoming, outgoing) => {
   try {
     const url = new URL(incoming.url, 'http://localhost');
-    if (url.pathname.startsWith('/api/')) {
-      const response = await handleApi(new Request(url, { method: incoming.method }));
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/')) {
+      const headers = new Headers(incoming.headers);
+      for (const name of [...headers.keys()]) if (name.startsWith('oai-authenticated-')) headers.delete(name);
+      const chunks=[]; let size=0;
+      for await (const chunk of incoming) { size+=chunk.length; if(size>16384) { outgoing.writeHead(413, SECURITY_HEADERS); outgoing.end(); return; } chunks.push(chunk); }
+      const request = new Request(url, {method:incoming.method, headers, ...(!['GET','HEAD'].includes(incoming.method) ? {body:Buffer.concat(chunks)} : {})});
+      const response = await handleApplicationRequest(request, {});
       outgoing.writeHead(response.status, Object.fromEntries(response.headers));
       outgoing.end(incoming.method === 'HEAD' ? undefined : Buffer.from(await response.arrayBuffer()));
       return;

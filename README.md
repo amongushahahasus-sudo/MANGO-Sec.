@@ -1,53 +1,51 @@
 # MANGO Sec.
 
-日本株・米国株の実際の株価・チャートを使って、仮想資金で売買を練習するWebアプリです。実際の注文・送金は行いません。
+日本株・米国株の実際の相場データで学ぶ、公開Webアプリです。画面はGitHub Pages、認証・相場API・口座保存はSitesのCloudflare WorkerとD1で動作します。実際の注文や送金は行いません。
 
-## 起動
-
-Node.js 22以降（推奨24）があれば、追加パッケージやAPIキーなしで起動できます。
-
-```sh
-npm start
-```
-
-ブラウザーで `http://localhost:3000` を開きます。ポートは `PORT` 環境変数で指定できます。
-
-```sh
-npm test
-npm run build
-```
-
-`npm run build` はCloudflare Workers互換の単一ESモジュールとSites用の `dist/` を生成します。通常のNode.jsサーバーとしても動作します。GitHub Actionsでテストとビルドを確認します。GitHub Pages単体では株価APIが動作しないため、Node.jsまたはWorkerを実行できるホスティングを使用してください。
+- 公開アプリ: https://amongushahahasus-sudo.github.io/MANGO-Sec./
+- API: https://mango-sec-trading.azumaishow781.chatgpt.site
 
 ## 機能
 
-- 日本株と米国株の銘柄検索・チャート表示
-- キオクシア（285A）、JR東日本（9020）、任天堂（7974）、NVIDIA、Qualcomm、Apple、Microsoftなど
-- 日本円1,000万円・米ドル10,000ドルで始める仮想口座
-- 1株からの仮想売買、残高・保有株数チェック
-- 通貨別の資産評価・損益、保有銘柄、取引履歴
-- 同じブラウザー内への保存、口座リセット
-- 銘柄ごとのGoogle Finance参照リンク
+- 日本株・米国株11銘柄。キオクシア、JR東日本、任天堂、NVIDIA、Qualcomm、Apple、Microsoft、トヨタ、ソニー、Amazon、Alphabet
+- 実際の価格による折れ線・ローソク足チャート。欠けたOHLCは補完しません
+- ライト、ダーク、時間帯による自動テーマ（端末の現地時刻7〜19時がライト）
+- ChatGPTで登録・ログイン。初回ログイン時に個別の仮想口座を作成
+- 初期資金は1,000万円と10,000米ドル。通貨別の資産評価・損益、保有銘柄、取引履歴、ウォッチリスト
+- 口座・履歴は利用者ごとにサーバー保存。別の端末から同じChatGPTアカウントで再利用できます
+- Google Financeの参照リンク、取得元・価格時刻・取得時刻の表示
 
-## 相場データ
+## 起動と検証
 
-株価・時系列はYahoo Financeのチャート用データ取得先からサーバー経由で取得します。Google Financeからの自動取得は使用せず、参照先としてリンクしています。画面には取得元、株価時刻、取得時刻を表示します。価格やチャートを生成・補完するフォールバックはありません。
+Node.js24以降。追加パッケージやAPIキーは不要です。
 
-この取得先はSLAのない非公式インターフェースです。遅延、休場日の終値、取得制限、仕様変更がありえます。継続運用や一般公開の前には、用途と再配布条件に合う契約済み相場APIに差し替えてください。データの利用条件は [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html) と [Yahoo Finance data providers](https://help.yahoo.com/kb/finance-for-web/SLN2310.html) を確認してください。
+```sh
+npm start
+npm test
+npm run db:generate
+npm run build
+```
 
-取得エラー時は理由を表示します。約定は取得から5分以内、価格時刻から7日以内の実際の参照価格を使う簡易方式です。市場時間外でも直近の参照価格で練習できます。実際の取引所約定、板、スリッページ、手数料、税金、配当、分割・併合、指値、為替交換には対応していません。日本株の1株単位取引も練習用の簡略化です。JPYとUSDは混ぜずに別々に管理します。
+`npm start` は http://localhost:3000 で相場UIを配信します。認証には公開済みAPIを使います。開発サーバーに渡された `oai-authenticated-*` ヘッダーは破棄し、ローカルHTTP要求が利用者を偽装できないようにしています。
 
-## 保存とプライバシー
+`npm run db:generate` は `db/schema.sql` をSQLiteで検証し、初回のSQLと標準Drizzle形式のジャーナルを生成します。既存の適用済みマイグレーションは上書きしません。以後のスキーマ変更は新しい番号のSQLとジャーナル項目を追加してください。
 
-口座と取引履歴はブラウザーのlocalStorageに保存されます。ログイン・サーバー口座保存・複数端末同期はありません。ブラウザーデータの削除で失われます。保存内容を開発者ツールで編集できるため、競技の順位付けや金銭価値のある用途には使わないでください。
+`npm run build` は外部依存なしで単一Workerモジュールと `dist/.openai/drizzle/` のマイグレーションを生成・検証します。GitHub Actionsでテスト・ビルドを確認し、`public/` をGitHub Pagesへ配信します。API変更はSitesへの別デプロイが必要です。GitHub PagesだけでDBや認証APIは実行できません。
 
-## 構成
+## 認証・保存
 
-- `public/` — 画面、チャート、仮想取引ロジック
-- `src/market.js` — 銘柄定義、相場取得、APIルート
-- `server.mjs` — Node.jsサーバー
-- `scripts/` — Worker生成、ビルド、成果物検証
-- `tests/` — 売買計算と相場データ処理のテスト
-- `.openai/hosting.json` — 非公開Sitesの識別子（認証情報は含みません）
+SitesのChatGPT認証を使います。GitHub Pagesへの復帰時は一回限り・5分期限のコードとPKCEで確認し、APIトークンを渡します。トークンのハッシュだけをD1に保存し、有効期限は7日です。ブラウザーではsessionStorageに保存し、タブを閉じると再ログインが必要になります。サーバーに保存された口座は消えません。アプリがChatGPTのパスワードを受け取ることはありません。
 
-本アプリは学習用シミュレーターです。表示情報は投資助言ではありません。
+口座APIは確認済み利用者IDでレコードを分離します。売買はサーバーが取得した株価で計算します。口座の更新番号と注文IDを使い、同時操作や応答不明時の二重約定を防ぎます。GitHub Pagesの指定オリジンだけにCORSを許可します。
+
+以前のブラウザー内口座は自動でサーバーにアップロードしません。新しいログイン口座は初期資金から開始します。テーマとチャート表示、未ログイン時のウォッチリストはブラウザー設定です。
+
+D1テーブルは `mango_accounts`、`mango_login_codes`、`mango_sessions` です。`.openai/hosting.json` の `d1: "DB"` をSitesが用意します。マイグレーションは配信前に適用し、HTTP要求の処理中にテーブルを作成しません。
+
+## 相場データとシミュレーションの範囲
+
+Yahoo Financeの非公式チャート取得先をサーバーから参照します。遅延・レート制限・仕様変更がありえます。取得できないときはエラーを表示し、架空の価格に置き換えません。利用条件は [Yahoo Terms of Service](https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html) と [Yahoo Finance data providers](https://help.yahoo.com/kb/finance-for-web/SLN2310.html) を参照してください。
+
+市場時間外も直近の通常取引価格で練習できます。取得から5分以内、価格時刻から7日以内の参照価格を使います。日本株の1株単位も学習用の簡略化です。板、スリッページ、税金、配当、株式分割・併合、指値、為替交換には対応しません。JPYとUSDは別々に管理します。
+
+学習用のシミュレーターであり、投資助言ではありません。

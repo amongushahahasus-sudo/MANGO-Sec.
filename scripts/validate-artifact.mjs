@@ -28,7 +28,7 @@ const home = await workerModule.default.fetch(new Request("https://example.test/
 assert.equal(home.status, 200);
 assert.match(home.headers.get("Content-Type"), /text\/html/);
 assert.match(await home.text(), /MANGO Sec\./);
-for (const route of ["/app.js", "/styles.css", "/trading.js"]) {
+for (const route of ["/app.js", "/styles.css", "/trading.js", "/auth-client.js", "/theme.js", "/charts.js"]) {
   const response = await workerModule.default.fetch(new Request("https://example.test" + route));
   assert.equal(response.status, 200, `${route} must be embedded`);
   assert.ok((await response.text()).length > 100);
@@ -40,3 +40,10 @@ assert.equal(missing.status, 404);
 const head = await workerModule.default.fetch(new Request("https://example.test/api/stocks", {method:"HEAD"}));
 assert.equal((await head.text()), "");
 console.log("Worker routes serve browser assets and API; HEAD has no body");
+
+const journal=JSON.parse(await readFile(resolve(projectRoot,"dist/.openai/drizzle/meta/_journal.json"),"utf8"));
+assert.equal(journal.entries[0].tag,"0000_mango_accounts");
+const cors=await workerModule.default.fetch(new Request("https://example.test/api/account",{headers:{Origin:"https://amongushahahasus-sudo.github.io"}}));
+assert.equal(cors.status,401);
+assert.equal(cors.headers.get("Access-Control-Allow-Origin"),"https://amongushahahasus-sudo.github.io");
+console.log("Authenticated API and database migration sidecar are packaged");

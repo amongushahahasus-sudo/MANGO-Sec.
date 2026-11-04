@@ -2,12 +2,15 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://mango-sec-trading.azumaishow781.chatgpt.site; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f8fa">
+  <meta name="mango-api-base" content="https://mango-sec-trading.azumaishow781.chatgpt.site">
   <meta name="description" content="MANGO Sec. は日本株と米国株の実際の市場データで学ぶ株取引シミュレーターです。仮想資金で、自分のペースで投資を体験。">
   <title>MANGO Sec. — 株取引シミュレーター</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath fill='%23ffad42' d='M49 16C34 5 11 18 10 36c-1 20 25 24 37 9 9-12 10-23 2-29Z'/%3E%3Cpath fill='%233e7760' d='M35 13C39 0 51 1 56 4c-2 10-12 14-21 9Z'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
 <div class="app-shell">
@@ -24,16 +27,17 @@
       <button class="nav-item" data-view="history"><svg viewBox="0 0 24 24"><path d="M4 5v5h5M4.6 9a8 8 0 1 1-.2 6M12 7v5l3 2"/></svg>取引履歴</button>
     </nav>
     <div class="sidebar-note"><span class="note-icon">✦</span><strong>小さな一歩から、投資を。</strong><p>本物の市場で、リスクなく練習。<br>ここから自分の投資スタイルを。</p><span class="practice-tag"><span></span> シミュレーション口座</span></div>
-    <div class="sidebar-bottom"><button id="reset-account" class="nav-item" title="口座をリセット" aria-label="口座をリセット"><svg viewBox="0 0 24 24"><path d="M4 5v5h5M4.6 9a8 8 0 1 1-.2 6"/></svg>口座をリセット</button><div class="sidebar-version">MANGO Sec. <span>ver. 1.0</span></div></div>
+    <div class="sidebar-bottom"><button id="reset-account" class="nav-item" title="口座をリセット" aria-label="口座をリセット"><svg viewBox="0 0 24 24"><path d="M4 5v5h5M4.6 9a8 8 0 1 1-.2 6"/></svg>口座をリセット</button><div class="sidebar-version">MANGO Sec. <span>ver. 2.0</span></div></div>
   </aside>
   <main class="workspace">
-    <header class="topbar"><div class="breadcrumb"><span>MANGO Sec.</span><span class="breadcrumb-divider">/</span><strong id="breadcrumb-current">マーケット</strong></div><div class="topbar-actions"><span class="status-pill"><i></i>仮想取引モード</span><span class="avatar" aria-label="ローカル口座">M</span></div></header>
+    <header class="topbar"><div class="breadcrumb"><span>MANGO Sec.</span><span class="breadcrumb-divider">/</span><strong id="breadcrumb-current">マーケット</strong></div><div class="topbar-actions"><div id="theme-control"></div><div class="auth-controls" id="auth-control"></div></div></header>
     <div class="content">
       <div class="page-heading"><div><p class="eyebrow">YOUR NEXT CHAPTER STARTS HERE</p><h1 class="page-title" id="page-title">マーケット</h1><p class="page-subtitle" id="page-subtitle">市場を知る。投資を試す。自分のペースで。</p></div><div class="heading-actions"><span class="today-date" id="today-date"></span><button class="btn btn-secondary" id="refresh-market"><svg viewBox="0 0 24 24"><path d="M20 4v6h-6M4 20v-6h6M5.1 9a7 7 0 0 1 11.6-4.2L20 8M4 16l3.3 3.2A7 7 0 0 0 18.9 15"/></svg>更新</button></div></div>
+      <section class="account-access-banner panel" id="account-access"><div class="account-access-copy"><h2 class="panel-title">自分だけの仮想口座で、投資を始めよう。</h2><p id="account-access-message">ログインすると、口座・保有株・取引履歴をサーバーに保存できます。</p></div><button class="btn btn-primary" id="account-signin" data-signin>ChatGPTで登録・ログイン</button></section>
       <section class="account-strip" aria-label="仮想口座の残高">
-        <article class="account-card"><div class="account-label"><span class="account-icon orange">¥</span>日本円の買付余力</div><div class="account-value" id="balance-jpy">¥10,000,000<span>JPY</span></div><div class="account-note">日本株の取引に使える仮想資金</div></article>
-        <article class="account-card"><div class="account-label"><span class="account-icon green">$</span>米ドルの買付余力</div><div class="account-value" id="balance-usd">$10,000.00<span>USD</span></div><div class="account-note">米国株の取引に使える仮想資金</div></article>
-        <article class="account-card"><div class="account-label"><span class="account-icon navy"><svg viewBox="0 0 24 24"><path d="M4 18V9h4v9M10 18V5h4v13M16 18v-7h4v7"/></svg></span>あなたの投資</div><div class="account-value" id="holdings-count">0<span>銘柄保有</span></div><div class="account-note" id="trade-count">最初の取引をはじめましょう</div></article>
+        <article class="account-card"><div class="account-label"><span class="account-icon orange">¥</span>日本円の買付余力</div><div class="account-value" id="balance-jpy">—<span>JPY</span></div><div class="account-note">日本株の取引に使える仮想資金</div></article>
+        <article class="account-card"><div class="account-label"><span class="account-icon green">$</span>米ドルの買付余力</div><div class="account-value" id="balance-usd">—<span>USD</span></div><div class="account-note">米国株の取引に使える仮想資金</div></article>
+        <article class="account-card"><div class="account-label"><span class="account-icon navy"><svg viewBox="0 0 24 24"><path d="M4 18V9h4v9M10 18V5h4v13M16 18v-7h4v7"/></svg></span>あなたの投資</div><div class="account-value" id="holdings-count">—<span>銘柄保有</span></div><div class="account-note" id="trade-count">最初の取引をはじめましょう</div></article>
       </section>
       <div class="error-banner" id="storage-error" role="alert" hidden>ブラウザーへの保存が利用できません。取引内容はこの画面を閉じると失われる場合があります。</div>
       <section id="market-view" class="dashboard-grid">
@@ -41,16 +45,16 @@
           <div class="market-layout"><div class="stock-list" id="stock-list" aria-label="銘柄一覧"></div><div class="detail-panel" id="stock-detail" aria-live="polite"></div></div>
           <div class="market-note"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg><span>市場データには遅延があります。休場中は直近の取引価格を表示します。</span></div>
         </div>
-        <aside class="order-panel panel" aria-label="仮想注文"><div class="order-header"><span class="order-icon"><svg viewBox="0 0 24 24"><path d="M4 7h14l-4-4M20 17H6l4 4M18 7l-4 4M6 17l4-4"/></svg></span><div><h2 class="panel-title">仮想取引</h2><p class="panel-subtitle">経験を、ここから。</p></div></div><div class="order-tabs" role="group" aria-label="売買区分"><button class="active" data-side="buy">買う</button><button data-side="sell">売る</button></div><form class="order-form" id="order-form"><div class="order-stock" id="order-stock">銘柄を選択</div><label class="field-label" for="quantity">注文数量<span>株</span></label><div class="quantity-control"><button type="button" id="quantity-minus" aria-label="1株減らす">−</button><input id="quantity" type="number" min="1" max="1000000" step="1" value="1" required inputmode="numeric" aria-label="注文数量"><button type="button" id="quantity-plus" aria-label="1株増やす">＋</button></div><div class="preset-buttons"><button type="button" data-qty="1">1株</button><button type="button" data-qty="10">10株</button><button type="button" data-qty="100">100株</button><button type="button" id="quantity-max">最大</button></div><p class="fractional-note">日本株も1株から練習できます。</p><div class="order-summary"><div class="summary-row"><span>参考価格</span><strong id="order-price">—</strong></div><div class="summary-row"><span>保有数量</span><strong id="order-held">0 株</strong></div><div class="summary-row"><span>取引手数料</span><strong>無料</strong></div><div class="summary-row total"><span>概算約定代金</span><strong id="order-total">—</strong></div></div><div class="order-available"><span id="available-label">買付余力</span><strong id="order-available">—</strong></div><button type="submit" class="btn btn-primary order-submit" id="order-submit" disabled>注文内容を確認 <span>→</span></button><p class="order-disclaimer">確認時に価格を再取得します。実際の金銭や株式は移動しません。</p><div class="order-feedback" id="order-feedback" role="status"></div></form><div class="order-tip"><span>🌱</span><div><strong>まずは1株から。</strong><p>小さな取引を積み重ねて、値動きと資産の変化を体感しましょう。</p></div></div></aside>
+        <aside class="order-panel panel" aria-label="仮想注文"><div class="order-header"><span class="order-icon"><svg viewBox="0 0 24 24"><path d="M4 7h14l-4-4M20 17H6l4 4M18 7l-4 4M6 17l4-4"/></svg></span><div><h2 class="panel-title">仮想取引</h2><p class="panel-subtitle">経験を、ここから。</p></div></div><div class="order-tabs" role="group" aria-label="売買区分"><button class="active" data-side="buy">買う</button><button data-side="sell">売る</button></div><form class="order-form" id="order-form"><div class="order-stock" id="order-stock">銘柄を選択</div><label class="field-label" for="quantity">注文数量<span>株</span></label><div class="quantity-control"><button type="button" id="quantity-minus" aria-label="1株減らす">−</button><input id="quantity" type="number" min="1" max="1000000" step="1" value="1" required inputmode="numeric" aria-label="注文数量"><button type="button" id="quantity-plus" aria-label="1株増やす">＋</button></div><div class="preset-buttons"><button type="button" data-qty="1">1株</button><button type="button" data-qty="10">10株</button><button type="button" data-qty="100">100株</button><button type="button" id="quantity-max">最大</button></div><p class="fractional-note">日本株も1株から練習できます。</p><div class="order-summary"><div class="summary-row"><span>参考価格</span><strong id="order-price">—</strong></div><div class="summary-row"><span>保有数量</span><strong id="order-held">0 株</strong></div><div class="summary-row"><span>取引手数料</span><strong>無料</strong></div><div class="summary-row total"><span>概算約定代金</span><strong id="order-total">—</strong></div></div><div class="order-available"><span id="available-label">買付余力</span><strong id="order-available">—</strong></div><button type="submit" class="btn btn-primary order-submit" id="order-submit" disabled>注文内容を確認 <span>→</span></button><p class="order-disclaimer">確定時の最新参考価格で仮想約定します。実際の金銭や株式は移動しません。</p><div class="order-feedback" id="order-feedback" role="status"></div></form><div class="order-tip"><span>🌱</span><div><strong>まずは1株から。</strong><p>小さな取引を積み重ねて、値動きと資産の変化を体感しましょう。</p></div></div></aside>
       </section>
       <section class="section-panel panel" id="portfolio-view" hidden><div class="panel-header"><div><h2 class="panel-title">保有銘柄</h2><p class="panel-subtitle">あなたの投資の現在地。</p></div><button class="btn btn-secondary" id="refresh-portfolio">評価額を更新</button></div><div id="portfolio-content"></div></section>
       <section class="section-panel panel" id="history-view" hidden><div class="panel-header"><div><h2 class="panel-title">取引履歴</h2><p class="panel-subtitle">一つひとつの経験が、次の投資につながる。</p></div><span class="data-badge" id="history-total">0 件</span></div><div id="history-content"></div></section>
-      <footer class="page-footer"><span>© <span id="copyright-year">2026</span> MANGO Sec.</span><p>学習用の株取引シミュレーターです。口座・履歴はこのブラウザーに保存されます。</p><a href="https://finance.yahoo.com/" target="_blank" rel="noopener noreferrer">Market data by Yahoo Finance ↗</a></footer>
+      <footer class="page-footer"><span>© <span id="copyright-year">2026</span> MANGO Sec.</span><p>学習用の株取引シミュレーターです。ログインした口座・保有株・履歴は利用者ごとにサーバーへ保存されます。</p><a href="https://finance.yahoo.com/" target="_blank" rel="noopener noreferrer">Market data by Yahoo Finance ↗</a></footer>
     </div>
   </main>
 </div>
 <div id="toast" class="toast" role="status" hidden></div>
 <dialog id="confirm-dialog" class="modal"><div class="modal-heading"><span class="eyebrow">PAPER TRADING</span><h2 id="dialog-title">注文の確認</h2><p id="dialog-description"></p></div><div class="dialog-summary" id="dialog-summary"></div><p class="order-disclaimer" id="dialog-disclaimer">表示された実際の市場価格で仮想約定します。実注文は送信されません。</p><div class="modal-actions"><button class="btn btn-secondary" id="dialog-cancel">キャンセル</button><button class="btn btn-primary" id="dialog-confirm">仮想注文を確定</button></div></dialog>
-<script type="module" src="/app.js"></script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>
