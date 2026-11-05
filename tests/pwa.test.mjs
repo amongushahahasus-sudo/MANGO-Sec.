@@ -75,9 +75,14 @@ test('manifest installs within the GitHub Pages project path using genuine PNG a
   assert.equal(manifest.name, 'MANGO Sec.');
   assert.equal(manifest.lang, 'ja');
   assert.equal(manifest.display, 'standalone');
-  for (const field of ['id', 'start_url', 'scope']) {
+  assert.equal(manifest.id, '/MANGO-Sec./');
+  const publishedManifestUrl = new URL('manifest.webmanifest', scope);
+  const startUrl = new URL(manifest.start_url, publishedManifestUrl);
+  // The id algorithm uses start_url's origin; scope and start_url use the manifest URL.
+  assert.equal(new URL(manifest.id, `${startUrl.origin}/`).href, scope);
+  for (const field of ['start_url', 'scope']) {
     assert.equal(manifest[field], './');
-    assert.equal(new URL(manifest[field], scope).href, scope);
+    assert.equal(new URL(manifest[field], publishedManifestUrl).href, scope);
   }
   assert.equal(manifest.background_color, '#f7f8fa');
   assert.equal(manifest.theme_color, '#f7f8fa');
@@ -91,6 +96,17 @@ test('manifest installs within the GitHub Pages project path using genuine PNG a
     assert.equal(png.readUInt32BE(20), height);
     assert.ok(png.length > 1000);
   }
+});
+
+test('manifest IDs remain distinct across sibling GitHub Pages applications', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../public/manifest.webmanifest', import.meta.url), 'utf8'));
+  const origin = new URL(scope).origin;
+  const startUrls = [new URL('./', `${scope}manifest.webmanifest`), new URL('./', `${origin}/-/manifest.webmanifest`)];
+  const oldIds = startUrls.map(start => new URL('./', `${start.origin}/`).href);
+  assert.equal(oldIds[0], `${origin}/`);
+  assert.equal(oldIds[0], oldIds[1], 'relative directory-looking IDs resolve to the shared origin');
+  const correctedIds = [manifest.id, '/-/', '/mango67A/'].map(id => new URL(id, `${origin}/`).href);
+  assert.equal(new Set(correctedIds).size, 3, 'each app needs its own origin-relative identity');
 });
 
 test('precache stores only public assets and rejects optional missing files and HTML masquerading as JavaScript', async () => {
